@@ -16,10 +16,10 @@ defmodule OpentelemetryPhoenix do
                       default: true,
                       doc: "Whether LiveView traces will be instrumented."
                     ],
-                    callback: [
-                      type: {:in, [{:fun, [{:list, :atom}, :map, :map, :keyword_list]}, nil]},
+                    preprocessor: [
+                      type: :any,
                       default: nil,
-                      doc: "A callback during non live-view event handling"
+                      doc: "A preprocessor called during non live-view event handling"
                     ]
                   )
 
@@ -74,8 +74,8 @@ defmodule OpentelemetryPhoenix do
   @typedoc "The phoenix server adapter being used. Optional"
   @type adapter :: {:adapter, :cowboy2 | :bandit | term()}
 
-  @typedoc "A non-live view event callback"
-  @type callback :: fun([atom(), ...], map(), map(), term())
+  @typedoc "A non-live view event preprocessor"
+  @type preprocessor :: fun()
 
   @doc """
   Initializes and configures the telemetry handlers.
@@ -102,7 +102,7 @@ defmodule OpentelemetryPhoenix do
       {__MODULE__, :endpoint_start},
       opts[:endpoint_prefix] ++ [:start],
       &__MODULE__.handle_endpoint_start/4,
-      %{adapter: opts[:adapter], callback: opts[:callback]}
+      %{adapter: opts[:adapter], preprocessor: opts[:preprocessor]}
     )
   end
 
@@ -112,7 +112,7 @@ defmodule OpentelemetryPhoenix do
       {__MODULE__, :endpoint_stop},
       opts[:endpoint_prefix] ++ [:stop],
       &__MODULE__.handle_endpoint_stop/4,
-      %{adapter: opts[:adapter], callback: opts[:callback]}
+      %{adapter: opts[:adapter], preprocessor: opts[:preprocessor]}
     )
   end
 
@@ -122,7 +122,7 @@ defmodule OpentelemetryPhoenix do
       {__MODULE__, :router_dispatch_start},
       [:phoenix, :router_dispatch, :start],
       &__MODULE__.handle_router_dispatch_start/4,
-      %{callback: opts[:callback]}
+      %{preprocessor: opts[:preprocessor]}
     )
   end
 
@@ -132,7 +132,7 @@ defmodule OpentelemetryPhoenix do
       {__MODULE__, :router_dispatch_exception},
       [:phoenix, :router_dispatch, :exception],
       &__MODULE__.handle_router_dispatch_exception/4,
-      %{callback: opts[:callback]}
+      %{preprocessor: opts[:preprocessor]}
     )
   end
 
@@ -162,6 +162,8 @@ defmodule OpentelemetryPhoenix do
 
   @doc false
   def handle_endpoint_start(event, measurements, meta, config) do
+    if config.preprocessor, do: preprocess(event, measurements, meta, config, config.preprocessor)
+
     Process.put({:otel_phoenix, :adapter}, config.adapter)
 
     case adapter() do
@@ -174,8 +176,6 @@ defmodule OpentelemetryPhoenix do
       _ ->
         default_start(meta)
     end
-  after
-    if config.callback, do: handle_callback(event, measurements, meta, config, config.callback)
   end
 
   defp cowboy2_start do
@@ -222,6 +222,8 @@ defmodule OpentelemetryPhoenix do
 
   @doc false
   def handle_endpoint_stop(event, measurements, meta, config) do
+    if config.preprocessor, do: preprocess(event, measurements, meta, config, config.preprocessor)
+
     case adapter() do
       :cowboy2 ->
         :ok
@@ -232,8 +234,6 @@ defmodule OpentelemetryPhoenix do
       _ ->
         default_stop(meta)
     end
-  after
-    if config.callback, do: handle_callback(event, measurements, meta, config, config.callback)
   end
 
   defp default_stop(meta) do
@@ -254,6 +254,8 @@ defmodule OpentelemetryPhoenix do
 
   @doc false
   def handle_router_dispatch_start(event, measurements, meta, config) do
+    if config.preprocessor, do: preprocess(event, measurements, meta, config, config.preprocessor)
+
     attributes = %{
       :"phoenix.plug" => meta.plug,
       :"phoenix.action" => meta.plug_opts,
@@ -262,8 +264,6 @@ defmodule OpentelemetryPhoenix do
 
     Tracer.update_name("#{meta.route}")
     Tracer.set_attributes(attributes)
-  after
-    if config.callback, do: handle_callback(event, measurements, meta, config, config.callback)
   end
 
   @doc false
@@ -274,6 +274,9 @@ defmodule OpentelemetryPhoenix do
         config
       ) do
     if OpenTelemetry.Span.is_recording(OpenTelemetry.Tracer.current_span_ctx()) do
+      if config.preprocessor,
+        do: preprocess(event, measurements, meta, config, config.preprocessor)
+
       {[reason: reason], attrs} =
         Reason.normalize(reason)
         |> Keyword.split([:reason])
@@ -287,8 +290,6 @@ defmodule OpentelemetryPhoenix do
       # do not close the span as endpoint stop will still be called with
       # more info, including the status code, which is nil at this stage
     end
-  after
-    if config.callback, do: handle_callback(event, measurements, meta, config, config.callback)
   end
 
   def handle_liveview_event(
@@ -415,7 +416,7 @@ defmodule OpentelemetryPhoenix do
     Process.get({:otel_phoenix, :adapter})
   end
 
-  defp handle_callback(event, measurements, meta, config, callback) do
-    callback.(event, measurements, meta, config)
+  defp preprocess(event, measurements, meta, config, preprocessor) do
+    preprocessor.(event, measurements, meta, config)
   end
 end
