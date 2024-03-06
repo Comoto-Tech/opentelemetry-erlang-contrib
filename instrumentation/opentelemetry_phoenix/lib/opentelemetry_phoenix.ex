@@ -66,7 +66,7 @@ defmodule OpentelemetryPhoenix do
   @tracer_id __MODULE__
 
   @typedoc "Setup options"
-  @type opts :: [endpoint_prefix() | adapter()]
+  @type opts :: [endpoint_prefix() | adapter() | preprocessor()]
 
   @typedoc "The endpoint prefix in your endpoint. Defaults to `[:phoenix, :endpoint]`"
   @type endpoint_prefix :: {:endpoint_prefix, [atom()]}
@@ -75,7 +75,7 @@ defmodule OpentelemetryPhoenix do
   @type adapter :: {:adapter, :cowboy2 | :bandit | term()}
 
   @typedoc "A non-live view event preprocessor"
-  @type preprocessor :: fun()
+  @type preprocessor :: {:preprocessor, fun()}
 
   @doc """
   Initializes and configures the telemetry handlers.
